@@ -7,6 +7,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08c48aae112d48ed9f069b33538ea9e3e90aa263cfa3d1c24309612b1f7472de"
 
 [[package]]
+name = "evmap"
+version = "10.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e3ea06a83f97d3dc2eb06e51e7a729b418f0717a5558a5c870e3d5156dc558d"
+dependencies = [
+ "hashbag",
+ "slab",
+ "smallvec",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -102,6 +113,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbag"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "452b31b3ffe7cf13de531eefae493301c85995a953c808d7c79a8f45abae0706"
+
+[[package]]
 name = "memchr"
 version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -176,6 +193,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 
 [[package]]
+name = "smallvec"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7cb5678e1615754284ec264d9bb5b4c27d2018577fd90ac0ceb578591ed5ee4"
+
+[[package]]
 name = "syn"
 version = "1.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -191,6 +214,7 @@ name = "tcp_chunker"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "evmap",
  "futures",
 ]
 

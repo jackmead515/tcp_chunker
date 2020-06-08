@@ -1,53 +1,99 @@
-use byteorder::ReadBytesExt;
-use std::net::{TcpStream};
-use std::io::Cursor;
+use std::net::TcpStream;
 
-use crate::protocol::read::read;
+use crate::protocol::read;
 use crate::protocol::errors::Errors;
+use crate::protocol::util;
 
-use byteorder::{LittleEndian};
+pub const UUID_BYTES: usize = 128;
+pub const UUID_POS: u8 = 0;
 
-pub const HEADERS_SIZE: usize = 128 + 32 + 32 + 32;
+pub const CHUNK_BYTES: usize = 32;
+pub const CHUNK_POS: u8 = 1;
+
+pub const CHUNK_LENGTH_BYTES: usize = 32;
+pub const CHUNK_LENGTH_POS: u8 = 2;
+
+pub const CHUNK_AMOUNT_BYTES: usize = 32;
+pub const CHUNK_AMOUNT_POS: u8 = 3;
+
+pub const FILE_NAME_BYTES: usize = 128;
+pub const FILE_NAME_POS: u8 = 4;
 
 pub struct Headers {
-  uuid: String,
-  chunk: usize,
-  chunk_length: usize,
-  chunk_amount: usize,
+  pub uuid: Option<String>,
+  pub chunk: Option<u32>,
+  pub chunk_length: Option<u32>,
+  pub chunk_amount: Option<u32>,
+  pub file_name: Option<String>,
 }
 
-pub fn headers(client: &mut TcpStream) -> Result<Headers, Errors> {
-  let data = match read(client, HEADERS_SIZE) {
-    Ok(d) => d,
-    Err(e) => {
-      return Err(Errors::ReadError);
-    }
-  };
+impl Headers { 
+  pub fn new() -> Self {
+    return Headers {
+      uuid: None,
+      file_name: None,
+      chunk: None,
+      chunk_length: None,
+      chunk_amount: None
+    };
+  }
 
-  let uuid = String::from_utf8_lossy(&data[0..128]).to_string();
-  let chunk = match Cursor::new(&data[128..160]).read_u32::<LittleEndian>() {
-    Ok(c) => c as usize,
-    Err(e) => {
-      return Err(Errors::ParseError);
-    }
-  };
-  let chunk_length = match Cursor::new(&data[160..192]).read_u32::<LittleEndian>() {
-    Ok(c) => c as usize,
-    Err(e) => {
-      return Err(Errors::ParseError);
-    }
-  };
-  let chunk_amount = match Cursor::new(&data[192..224]).read_u32::<LittleEndian>() {
-    Ok(c) => c as usize,
-    Err(e) => {
-      return Err(Errors::ParseError);
-    }
-  };
+  /// Reads and sets the headers from the tcp stream
+  pub fn read(&mut self, client: &mut TcpStream) -> Result<(), Errors> {
+    let params = read::pluck(client, 1)?[0];
 
-  return Ok(Headers {
-    uuid,
-    chunk,
-    chunk_length,
-    chunk_amount
-  });
+    if util::bit_at(params, UUID_POS) {
+      let data = read::pluck(client, UUID_BYTES)?;
+      self.uuid = Some(String::from_utf8_lossy(&data).to_string());
+    }
+  
+    if util::bit_at(params, CHUNK_POS) {
+      let data = read::pluck(client, CHUNK_BYTES)?;
+      self.chunk = Some(util::read_u32(data)?);
+    }
+  
+    if util::bit_at(params, CHUNK_LENGTH_POS) {
+      let data = read::pluck(client, CHUNK_LENGTH_BYTES)?;
+      self.chunk_length = Some(util::read_u32(data)?);
+    }
+  
+    if util::bit_at(params, CHUNK_AMOUNT_POS) {
+      let data = read::pluck(client, CHUNK_AMOUNT_BYTES)?;
+      self.chunk_amount = Some(util::read_u32(data)?);
+    }
+
+    if util::bit_at(params, FILE_NAME_POS) {
+      let data = read::pluck(client, FILE_NAME_BYTES)?;
+      self.file_name = Some(String::from_utf8_lossy(&data).to_string());
+    }
+
+    return Ok(());
+  }
+
+  pub fn is_new_request(&self) -> bool {
+    return self.uuid.is_none()
+      && self.chunk.is_none()
+      && self.chunk_length.is_some()
+      && self.chunk_amount.is_some()
+      && self.file_name.is_some();
+  }
+
+  pub fn is_next_chunk(&self) -> bool {
+    return self.uuid.is_some()
+      && self.chunk.is_some()
+      && self.chunk_length.is_none()
+      && self.chunk_amount.is_none()
+      && self.file_name.is_none();
+  }
+
+  pub fn is_last_chunk(&self, chunk_amount: u32) -> bool {
+    let is_next_chunk = self.is_next_chunk();
+
+    if is_next_chunk {
+      let chunk_number = self.chunk.unwrap();
+      return chunk_number >= chunk_amount - 1;
+    }
+
+    return false;
+  }
 }
