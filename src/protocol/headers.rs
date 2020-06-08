@@ -21,10 +21,21 @@ pub const FILE_NAME_POS: u8 = 4;
 
 pub struct Headers {
   pub uuid: Option<String>,
-  pub chunk: Option<u32>,
+  pub chunk_num: Option<u32>,
   pub chunk_length: Option<u32>,
   pub chunk_amount: Option<u32>,
   pub file_name: Option<String>,
+}
+
+pub struct NewRequestHeaders {
+  pub chunk_length: u32,
+  pub chunk_amount: u32,
+  pub file_name: String
+}
+
+pub struct ChunkHeaders {
+  pub uuid: String,
+  pub chunk_num: u32,
 }
 
 impl Headers { 
@@ -32,7 +43,7 @@ impl Headers {
     return Headers {
       uuid: None,
       file_name: None,
-      chunk: None,
+      chunk_num: None,
       chunk_length: None,
       chunk_amount: None
     };
@@ -49,7 +60,7 @@ impl Headers {
   
     if util::bit_at(params, CHUNK_POS) {
       let data = read::pluck(client, CHUNK_BYTES)?;
-      self.chunk = Some(util::read_u32(data)?);
+      self.chunk_num = Some(util::read_u32(data)?);
     }
   
     if util::bit_at(params, CHUNK_LENGTH_POS) {
@@ -72,28 +83,36 @@ impl Headers {
 
   pub fn is_new_request(&self) -> bool {
     return self.uuid.is_none()
-      && self.chunk.is_none()
+      && self.chunk_num.is_none()
       && self.chunk_length.is_some()
       && self.chunk_amount.is_some()
       && self.file_name.is_some();
   }
 
-  pub fn is_next_chunk(&self) -> bool {
+  pub fn get_new_request_headers(&self) -> NewRequestHeaders {
+    return NewRequestHeaders {
+      chunk_length: self.chunk_length.unwrap(),
+      chunk_amount: self.chunk_amount.unwrap(),
+      file_name: self.file_name.as_ref().unwrap().clone()
+    };
+  }
+
+  pub fn is_chunk_request(&self) -> bool {
     return self.uuid.is_some()
-      && self.chunk.is_some()
+      && self.chunk_num.is_some()
       && self.chunk_length.is_none()
       && self.chunk_amount.is_none()
       && self.file_name.is_none();
   }
 
-  pub fn is_last_chunk(&self, chunk_amount: u32) -> bool {
-    let is_next_chunk = self.is_next_chunk();
+  pub fn get_chunk_headers(&self) -> ChunkHeaders {
+    return ChunkHeaders {
+      uuid: self.uuid.as_ref().unwrap().clone(),
+      chunk_num: self.chunk_num.unwrap()
+    };
+  }
 
-    if is_next_chunk {
-      let chunk_number = self.chunk.unwrap();
-      return chunk_number >= chunk_amount - 1;
-    }
-
-    return false;
+  pub fn is_valid(&self) -> bool {
+    return self.is_chunk_request() || self.is_new_request();
   }
 }

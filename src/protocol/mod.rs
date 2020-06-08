@@ -1,21 +1,30 @@
 pub mod headers;
 pub mod read;
-pub mod data;
 pub mod errors;
 pub mod util;
+
+use dirs;
+use uuid::Uuid;
 
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::io::prelude::*;
+
+pub fn get_db_path() -> String {
+  let mut path = dirs::home_dir().unwrap().to_str().unwrap().to_string();
+  path.push_str("/.chunker/");
+  return path;
+}
 
 #[derive(Clone)]
 pub struct Request {
   uuid: String,
-  chunks: u32,
+  chunk_num: u32,
   chunk_length: u32,
   chunk_amount: u32,
-  file_name: String,
-  file_location: String,
+  chunk_pos: Vec<u32>,
+  file_name: String
 }
 
 pub struct Pipeline {
@@ -75,73 +84,94 @@ impl Pipeline {
     let mut headers = headers::Headers::new();
     headers.read(&mut self.client)?;
 
-    // next request
-    if headers.is_new_request() {
-      self.save_new_request(headers);
-    
-    // more data from existing request
-    } else if headers.is_next_chunk() {
-      self.ingest_chunk(&mut headers)?;
-      self.update_request(&mut headers)?;
-    
-    // headers are incorrect
-    } else {
-      return Err(errors::Errors::InvalidRequest);
+    if headers.is_valid() {
+      self.save_if_new_request(&headers);
+      self.update_request(headers)?;
+      self.reply_to_client();
+
+      return Ok(());
     }
-    
+  
+    return Err(errors::Errors::InvalidRequest);
+  }
+
+  /// Reads the chunk, updates the request, saves the file. Stuff like that.
+  fn update_request(&mut self, headers: headers::Headers) -> Result<(), errors::Errors> {
+    if headers.is_chunk_request() {
+      let uuid = headers.uuid.as_ref().unwrap();
+      let request = self.cache.get_request(uuid);
+      if !request.is_some() {
+        let mut request = request.unwrap();
+        self.ingest_chunk(&request)?;
+
+        let chunk_num = headers.chunk_num.unwrap();
+        request.chunk_num = chunk_num;
+        request.chunk_pos.push(chunk_num);
+
+        if self.is_last_request(&request) {
+
+          // TODO
+          // remove from cache
+          // and then rearrange file
+
+          self.cache.drop_request(uuid);
+        } else {
+          self.cache.save_request(uuid.clone(), request);
+        }
+      }
+    }
+
     return Ok(());
   }
 
-  fn ingest_chunk(&mut self, headers: &mut headers::Headers) -> Result<(), errors::Errors> {
-    let uuid = headers.uuid.as_ref().unwrap();
-    let request = self.cache.get_request(&uuid);
+  /// Reads the chunk from the TcpStream and writes to the file
+  fn ingest_chunk(&mut self, request: &Request) -> Result<(), errors::Errors> {
+    let chunk_data = read::read(&mut self.client, request.chunk_length as usize, 1024)?;
 
-    match request {
-      Some(request) => {
-        let handler = data::DataHandler::new();
-        handler.read_chunk(&mut self.client, request)?;
+    let mut file_location = String::from(get_db_path());
+    file_location.push_str(&request.uuid);
+    file_location.push_str("_");
+    file_location.push_str(&request.file_name);
 
-        return Ok(());
-      },
-      None => {
-        return Err(errors::Errors::InvalidRequest);
-      }
-    };
-  }
-
-  fn update_request(&mut self, headers: &mut headers::Headers) -> Result<(), errors::Errors> {
-    let chunk_number = headers.chunk.unwrap();
-    let uuid = headers.uuid.as_ref().unwrap();
-    let request = self.cache.get_request(&uuid);
-
-    match request {
-      Some(mut request) => {
-        request.chunks = chunk_number;
-        self.cache.save_request(uuid.clone(), request);
-
-        return Ok(());
-      },
-      None => {
-        return Err(errors::Errors::InvalidRequest);
-      }
+    if !util::file_exists(&file_location) {
+      util::create_file(&file_location)?;
     }
+
+    let mut file = util::open_w_file(&file_location)?;
+
+    return match file.write_all(&chunk_data[..]) {
+      Ok(()) => Ok(()),
+      Err(e) => return Err(errors::Errors::FileIOError)
+    };
   }
 
-  fn save_new_request(&mut self, headers: headers::Headers) {
-    let uuid = headers.uuid.unwrap();
-    let chunk_length = headers.chunk_length.unwrap();
-    let chunk_amount = headers.chunk_amount.unwrap();
-    let file_name = headers.file_name.unwrap();
-    let request = Request {
-      uuid: uuid.clone(),
-      chunks: 0,
-      chunk_length,
-      chunk_amount,
-      file_name,
-      file_location: "".to_string()
-    };
+  /// Tests if the request is the last request in the sequence
+  fn is_last_request(&self, request: &Request) -> bool {
+    if request.chunk_pos.len() == request.chunk_amount as usize {
+      return true;
+    }
 
-    self.cache.save_request(uuid, request);
+    return false;
+  }
+
+  /// Saves a new request from the headers
+  fn save_if_new_request(&mut self, headers: &headers::Headers) {
+    if headers.is_new_request() {
+      let headers = headers.get_new_request_headers();
+
+      let uuid = Uuid::new_v4().to_string();
+      let file_name = headers.file_name.clone();
+      let request = Request {
+        uuid: uuid.clone(),
+        file_name,
+        chunk_num: 0,
+        chunk_pos: Vec::new(),
+        chunk_length: headers.chunk_length,
+        chunk_amount: headers.chunk_amount,
+      };
+
+      self.cache.save_request(uuid, request);
+    }
   }
 }
 

@@ -1,5 +1,6 @@
 pub enum Errors {
   ReadError,
   ParseError,
-  InvalidRequest
+  InvalidRequest,
+  FileIOError
 }
